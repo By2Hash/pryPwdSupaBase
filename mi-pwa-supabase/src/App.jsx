@@ -1,86 +1,120 @@
 // src/App.jsx
 import React, { useState, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from './db';
 import { syncWithSupabase } from './syncService';
+import TodoList from './TodoList';
+import StockPanel from './StockPanel';
+import './App.css';
+
+const getCashierNames = () => {
+  try {
+    const saved = localStorage.getItem('cashierNames');
+    return saved ? JSON.parse(saved) : { 1: '', 2: '' };
+  } catch {
+    return { 1: '', 2: '' };
+  }
+};
 
 export default function App() {
-  const [title, setTitle] = useState('');
-
-  // Escuchar cambios en la BD local en tiempo real
-  const todos = useLiveQuery(() => db.todos.toArray());
+  const [viewMode, setViewMode] = useState('split');
+  const [activeTab, setActiveTab] = useState(1);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [cashierNames, setCashierNames] = useState(getCashierNames);
 
   useEffect(() => {
-    // Intentar sincronizar cuando cargue la app
     syncWithSupabase();
   }, []);
 
-  const handleAddTodo = async (e) => {
-    e.preventDefault();
-    if (!title.trim()) return;
-
-    // 1. Guardar localmente INCLUYENDO EL UUID ÚNICO
-    await db.todos.add({
-      uuid: crypto.randomUUID(), // <-- Clave para evitar duplicados
-      title: title.trim(),
-      is_complete: false,
-      remote_id: null,
-      sync_status: 'pending_insert'
-    });
-
-    setTitle('');
-
-    // 2. Intentar sincronizar con Supabase
-    syncWithSupabase();
+  const handleCashierNameChange = (panel, name) => {
+    const updated = { ...cashierNames, [panel]: name };
+    setCashierNames(updated);
+    localStorage.setItem('cashierNames', JSON.stringify(updated));
   };
 
-  const handleToggleComplete = async (todo) => {
-    const nextState = !todo.is_complete;
-    
-    await db.todos.update(todo.id, {
-      is_complete: nextState,
-      sync_status: todo.remote_id ? 'pending_update' : todo.sync_status
-    });
-
-    syncWithSupabase();
-  };
+  const isStockView = viewMode === 'stock';
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '500px', margin: '0 auto' }}>
-      <h1>Mi PWA Offline-First</h1>
-      
-      <form onSubmit={handleAddTodo} style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-        <input 
-          type="text" 
-          value={title} 
-          onChange={(e) => setTitle(e.target.value)} 
-          placeholder="Escribe una tarea..."
-          style={{ flex: 1, padding: '8px' }}
-        />
-        <button type="submit" style={{ padding: '8px 16px' }}>Guardar</button>
-      </form>
+    <div className="app-layout">
+      <button
+        className="sidebar-toggle"
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        title="Menu"
+      >
+        ☰
+      </button>
 
-      <h3>Lista de Tareas:</h3>
-      <ul style={{ listStyle: 'none', padding: 0 }}>
-        {todos?.map((todo) => (
-          <li key={todo.id} style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <input 
-              type="checkbox" 
-              checked={todo.is_complete || false} 
-              onChange={() => handleToggleComplete(todo)}
+      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+        <div className="sidebar-header">
+          <span className="sidebar-logo">✦</span>
+          <span className="sidebar-brand">Kiosco</span>
+        </div>
+        <nav className="sidebar-nav">
+          <button
+            className={`sidebar-btn ${viewMode === 'split' ? 'active' : ''}`}
+            onClick={() => { setViewMode('split'); setSidebarOpen(false); }}
+          >
+            <span className="sidebar-icon">⊞</span>
+            Pantalla Dividida
+          </button>
+          <button
+            className={`sidebar-btn ${viewMode === 'tabs' ? 'active' : ''}`}
+            onClick={() => { setViewMode('tabs'); setSidebarOpen(false); }}
+          >
+            <span className="sidebar-icon">⊟</span>
+            Pestañas
+          </button>
+          <div className="sidebar-divider" />
+          <button
+            className={`sidebar-btn ${isStockView ? 'active' : ''}`}
+            onClick={() => { setViewMode('stock'); setSidebarOpen(false); }}
+          >
+            <span className="sidebar-icon">☰</span>
+            Stock
+          </button>
+        </nav>
+      </aside>
+
+      {sidebarOpen && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
+
+      <main className="main-content">
+        {isStockView ? (
+          <StockPanel />
+        ) : viewMode === 'split' ? (
+          <div className="split-view">
+            <TodoList
+              panel={1}
+              cashierName={cashierNames[1]}
+              onCashierNameChange={(name) => handleCashierNameChange(1, name)}
             />
-            <span style={{ textDecoration: todo.is_complete ? 'line-through' : 'none' }}>
-              {todo.title}
-            </span>
-            {' '}
-            {todo.sync_status === 'synced' ? (
-              <span style={{ color: 'green', fontSize: '12px' }}>✓ (Sincronizado)</span>
-            ) : (
-              <span style={{ color: 'orange', fontSize: '12px' }}>⏳ (Pendiente offline)</span>
-            )}
-          </li>
-        ))}
-      </ul>
+            <TodoList
+              panel={2}
+              cashierName={cashierNames[2]}
+              onCashierNameChange={(name) => handleCashierNameChange(2, name)}
+            />
+          </div>
+        ) : (
+          <div className="tabs-view">
+            <div className="tabs-header">
+              <button
+                className={`tab-btn ${activeTab === 1 ? 'active' : ''}`}
+                onClick={() => setActiveTab(1)}
+              >
+                Caja 1 — {cashierNames[1] || 'Sin nombre'}
+              </button>
+              <button
+                className={`tab-btn ${activeTab === 2 ? 'active' : ''}`}
+                onClick={() => setActiveTab(2)}
+              >
+                Caja 2 — {cashierNames[2] || 'Sin nombre'}
+              </button>
+            </div>
+            <TodoList
+              panel={activeTab}
+              cashierName={cashierNames[activeTab]}
+              onCashierNameChange={(name) => handleCashierNameChange(activeTab, name)}
+            />
+          </div>
+        )}
+      </main>
     </div>
   );
 }
